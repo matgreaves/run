@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"syscall"
@@ -29,11 +30,9 @@ type Process struct {
 	Stdout io.Writer
 	Stderr io.Writer
 
-	// inherit environment variables from os.Env.
-	// Env takes priority over os variables.
+	// InheritOSEnv inherits environment variables from os.Environ.
+	// Env takes priority over inherited variables.
 	InheritOSEnv bool
-	// A list of environment variables to exclude when InheritOSEnv is true.
-	DoNotInherit []string
 }
 
 // Run implements [Runner] starting the external process.
@@ -55,6 +54,7 @@ func (p Process) Run(ctx context.Context) error {
 	cmd.Stdin = p.Stdin
 	cmd.Stdout = p.Stdout
 	cmd.Stderr = p.Stderr
+	cmd.Env = p.environ()
 
 	// Give the external process its own group to more easily clean up it and all of its children.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -84,4 +84,25 @@ func Command(cmd string, args ...string) Process {
 		Path: cmd,
 		Args: args,
 	}
+}
+
+// environ builds the environment variable slice for the subprocess.
+//
+// If neither Env nor InheritOSEnv is set, returns nil (inherit parent env).
+// If InheritOSEnv is set, starts with os.Environ().
+// Env entries are always appended last so they take priority.
+func (p Process) environ() []string {
+	if len(p.Env) == 0 && !p.InheritOSEnv {
+		return nil
+	}
+
+	var env []string
+	if p.InheritOSEnv {
+		env = append(env, os.Environ()...)
+	}
+
+	for k, v := range p.Env {
+		env = append(env, k+"="+v)
+	}
+	return env
 }
